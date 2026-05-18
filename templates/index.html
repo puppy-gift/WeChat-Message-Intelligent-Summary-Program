@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>微信聊天记录 AI 总结工具</title>
+    <style>
+        :root { --bg: #1e1e2e; --surface: #2a2a3c; --primary: #6c63ff; --text: #e0e0e0; --text-secondary: #a0a0b0; --border: #3e3e52; --error: #ff6b6b; }
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body { font-family: system-ui; background:var(--bg); color:var(--text); padding:1rem; }
+        .container { max-width:1100px; margin:0 auto; }
+        h1 { color:var(--primary); text-align:center; margin-bottom:1rem; }
+        .tabs { display:flex; gap:0.5rem; margin-bottom:1rem; }
+        .tab { flex:1; padding:0.7rem; background:var(--surface); border:1px solid var(--border); border-radius:8px 8px 0 0; text-align:center; cursor:pointer; font-weight:600; }
+        .tab.active { background:var(--primary); color:white; }
+        .tab-content { display:none; }
+        .tab-content.active { display:block; }
+        .card { background:var(--surface); border:1px solid var(--border); border-radius:0 0 12px 12px; padding:1.5rem; margin-bottom:1rem; }
+        .row { display:flex; gap:1rem; flex-wrap:wrap; margin-bottom:0.8rem; }
+        .flex-1 { flex:1; min-width:200px; }
+        label { font-weight:500; color:var(--text-secondary); display:block; margin-bottom:0.3rem; }
+        select, input, textarea { width:100%; background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:0.6rem; color:var(--text); }
+        .btn { background:var(--primary); color:white; border:none; border-radius:8px; padding:0.6rem 1.2rem; cursor:pointer; font-weight:600; }
+        .btn:disabled { opacity:0.5; cursor:not-allowed; }
+        .chat-list { max-height:300px; overflow-y:auto; background:var(--bg); border-radius:8px; }
+        .chat-item { padding:0.7rem 1rem; border-bottom:1px solid var(--border); cursor:pointer; display:flex; justify-content:space-between; align-items:center; }
+        .chat-item:hover { background:#363654; }
+        .chat-item.active { border-left:4px solid var(--primary); }
+        .message-box { max-height:300px; overflow-y:auto; background:var(--bg); border-radius:8px; padding:1rem; margin-top:0.5rem; white-space:pre-wrap; font-family:monospace; font-size:0.9rem; }
+        .error-text { color:var(--error); }
+        .loader { display:inline-block; width:1rem; height:1rem; border:2px solid rgba(255,255,255,0.3); border-top:2px solid white; border-radius:50%; animation:spin 0.8s linear infinite; margin-right:0.5rem; }
+        @keyframes spin { to { transform:rotate(360deg); } }
+        #result-box { background:var(--bg); border-radius:8px; padding:1rem; min-height:100px; white-space:pre-wrap; line-height:1.6; }
+        .label-text { font-weight:500; color:var(--text-secondary); font-size:0.9rem; margin-bottom:0.3rem; }
+        .file-upload { border:2px dashed var(--border); border-radius:12px; padding:2rem; text-align:center; cursor:pointer; }
+        .file-upload:hover { border-color:var(--primary); }
+
+        /* 风险弹窗 */
+        .modal { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); justify-content:center; align-items:center; z-index:1000; }
+        .modal.active { display:flex; }
+        .modal-content { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:2rem; max-width:500px; width:90%; }
+        .modal-content h3 { color:var(--error); margin-bottom:1rem; }
+        .modal-content p { margin:0.8rem 0; line-height:1.6; }
+        .modal-buttons { display:flex; gap:1rem; justify-content:flex-end; margin-top:1.5rem; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>💬 微信聊天记录 AI 总结工具</h1>
+
+    <!-- 选项卡 -->
+    <div class="tabs">
+        <div class="tab active" onclick="switchTab('auto')">🤖 自动抓取</div>
+        <div class="tab" onclick="switchTab('file')">📂 文件上传</div>
+        <div class="tab" onclick="switchTab('paste')">📋 手动粘贴</div>
+    </div>
+
+    <!-- 风险提示弹窗 -->
+    <div id="risk-modal" class="modal">
+        <div class="modal-content">
+            <h3>⚠️ 重要风险提示</h3>
+            <p>1. 自动抓取功能使用了第三方工具读取微信本地数据，可能<strong>违反微信用户协议</strong>，存在<strong>封号风险</strong>。</p>
+            <p>2. 本功能<strong>仅限您个人使用</strong>，严禁分享、传播或用于任何商业目的。</p>
+            <p>3. 建议使用<strong>不涉及核心业务的微信小号</strong>进行测试，并控制使用频率，避免触发风控。</p>
+            <p>4. 开发者不对因使用此功能导致的任何账号问题承担法律责任。您需自行承担全部风险。</p>
+            <div class="modal-buttons">
+                <button class="btn" onclick="confirmRisk()">我已了解风险，继续使用</button>
+                <button class="btn" style="background:#555;" onclick="cancelRisk()">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- AI 配置（共用） -->
+    <div class="card">
+        <div class="row">
+            <div class="flex-1"><label for="provider">🤖 AI 提供商</label><select id="provider" onchange="onProviderChange()"><option value="deepseek">DeepSeek</option><option value="openai">ChatGPT (OpenAI)</option><option value="grok">Grok (xAI)</option><option value="gemini">Gemini (Google)</option></select></div>
+            <div class="flex-1"><label for="api-key">🔑 API 密钥</label><input type="password" id="api-key" placeholder="输入密钥"></div>
+            <div style="align-self:end;"><button class="btn" onclick="saveKey()">保存密钥</button><span id="key-status"></span></div>
+        </div>
+        <div class="row">
+            <div class="flex-1"><label for="model">🧠 模型（留空默认）</label><input type="text" id="model" placeholder="例如: deepseek-chat"></div>
+            <div class="flex-1"><label for="style-mode">🎨 风格</label><select id="style-mode" onchange="toggleStyle()"><option value="auto">自动</option><option value="manual">手动</option></select></div>
+            <div class="flex-1" id="manual-style-wrapper" style="display:none;"><label for="manual-style">✍️ 自定义</label><input type="text" id="manual-style" placeholder="幽默吐槽风"></div>
+        </div>
+        <div class="row">
+            <div class="flex-1"><label for="keywords">🎯 关注关键词</label><input type="text" id="keywords" placeholder="张三, 李四, 项目A"></div>
+            <div style="align-self:end; padding-top:1.4rem;"><button class="btn" onclick="showMentioned()" id="mention-btn" disabled>🔍 查看提及</button></div>
+        </div>
+    </div>
+
+    <!-- 模式1：自动抓取 -->
+    <div class="tab-content active" id="tab-auto">
+        <div class="card">
+            <div class="row">
+                <div class="flex-1"><span id="wx-status">检测微信状态...</span></div>
+                <button class="btn" onclick="refreshChats()">刷新聊天列表</button>
+            </div>
+            <div class="row">
+                <div class="flex-1" style="flex:0 0 280px;">
+                    <div class="label-text">📋 选择聊天</div>
+                    <div class="chat-list" id="chat-list">请先刷新</div>
+                </div>
+                <div class="flex-1">
+                    <div class="label-text">💬 消息预览</div>
+                    <div class="row">
+                        <input type="date" id="since-date" style="flex:1;"> <input type="date" id="until-date" style="flex:1;">
+                        <button class="btn" onclick="loadAutoMessages()">加载</button>
+                        <a href="#" onclick="setQuickRange(7)" style="align-self:center;">近7天</a> | <a href="#" onclick="setQuickRange(30)">近30天</a>
+                    </div>
+                    <div class="message-box" id="auto-message-preview" style="height:200px;">点击左侧聊天并加载消息</div>
+                </div>
+            </div>
+            <div class="row">
+                <div class="flex-1">
+                    <label for="auto-interval">⏰ 定时自动总结（分钟）</label>
+                    <input type="number" id="auto-interval" value="0" min="0" step="1" placeholder="0表示关闭">
+                </div>
+                <div style="align-self:end;">
+                    <button class="btn" id="toggle-auto-btn" onclick="toggleAutoSummary()">启动定时总结</button>
+                    <span id="auto-status"></span>
+                </div>
+            </div>
+            <button class="btn" id="summarize-auto-btn" onclick="startSummary()" disabled>⚡ 开始总结</button>
+        </div>
+    </div>
+
+    <!-- 模式2：文件上传 -->
+    <div class="tab-content" id="tab-file">
+        <div class="card">
+            <div class="file-upload" id="drop-zone">
+                <div style="font-size:2rem;">📂</div>
+                <div>点击或拖拽文件到这里（支持 TXT/DOCX/PDF/Excel 等多种格式）</div>
+                <input type="file" id="file-input" accept=".txt,.docx,.doc,.pdf,.xlsx,.xls,.csv,.odt,.ods,.rtf,.html,.htm,.md,.markdown,.json,.xml" style="display:none;">
+            </div>
+            <div class="row" style="margin-top:1rem;">
+                <div class="flex-1"><span id="upload-status"></span></div>
+                <button class="btn" id="summarize-file-btn" onclick="startSummary()" disabled>⚡ 开始总结</button>
+            </div>
+            <div class="message-box" id="file-message-preview" style="display:none;"></div>
+        </div>
+    </div>
+
+    <!-- 模式3：手动粘贴 -->
+    <div class="tab-content" id="tab-paste">
+        <div class="card">
+            <textarea id="paste-input" style="width:100%; height:200px; background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:1rem;" placeholder="在此粘贴聊天记录..."></textarea>
+            <button class="btn" id="summarize-paste-btn" onclick="parsePasteAndSummary()" disabled>⚡ 解析并开始总结</button>
+            <div class="message-box" id="paste-message-preview" style="display:none;"></div>
+        </div>
+    </div>
+
+    <!-- 总结结果（共用） -->
+    <div class="card" id="result-card" style="display:none;">
+        <div class="label-text">📄 总结结果</div>
+        <div id="result-box"></div>
+    </div>
+</div>
+
+<script>
+    let currentMessages = [];
+    let currentMode = 'auto';
+    let selectedChatId = null;
+    let autoTimer = null;
+    let autoConfirmed = false;
+    let pendingTab = null;
+
+    window.onload = () => { 
+        loadKeyForProvider(); 
+        initUpload(); 
+        checkWxStatus();
+        if (currentMode === 'auto' && !autoConfirmed) {
+            pendingTab = 'auto';
+            document.getElementById('risk-modal').classList.add('active');
+        }
+    };
+
+    // 切换选项卡
+    function switchTab(mode) {
+        if (mode === 'auto' && !autoConfirmed) {
+            pendingTab = mode;
+            document.getElementById('risk-modal').classList.add('active');
+            return;
+        }
+        applyTabSwitch(mode);
+    }
+
+    function applyTabSwitch(mode) {
+        currentMode = mode;
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        const tabs = document.querySelectorAll('.tab');
+        tabs.forEach(t => {
+            if (t.getAttribute('onclick') && t.getAttribute('onclick').includes(`'${mode}'`)) {
+                t.classList.add('active');
+            }
+        });
+        document.getElementById(`tab-${mode}`).classList.add('active');
+        document.getElementById('summarize-auto-btn').disabled = true;
+        document.getElementById('summarize-file-btn').disabled = true;
+        document.getElementById('summarize-paste-btn').disabled = true;
+    }
+
+    function confirmRisk() {
+        autoConfirmed = true;
+        document.getElementById('risk-modal').classList.remove('active');
+        if (pendingTab) {
+            applyTabSwitch(pendingTab);
+            pendingTab = null;
+        }
+    }
+
+    function cancelRisk() {
+        document.getElementById('risk-modal').classList.remove('active');
+        applyTabSwitch('file');
+        pendingTab = null;
+    }
+
+    // 加载密钥
+    async function loadKeyForProvider() {
+        const p = document.getElementById('provider').value;
+        const res = await fetch(`/get_key/${p}`).catch(()=>{});
+        if (res && res.ok) {
+            const d = await res.json();
+            document.getElementById('api-key').value = d.key || '';
+            document.getElementById('key-status').innerText = d.key ? '✅ 已保存' : '❌ 未保存';
+        }
+    }
+    async function onProviderChange() { await loadKeyForProvider(); }
+    async function saveKey() {
+        const p = document.getElementById('provider').value;
+        const k = document.getElementById('api-key').value.trim();
+        if(!k) return alert('请输入密钥');
+        const res = await fetch('/save_key', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({provider:p, api_key:k})});
+        const d = await res.json();
+        if(d.success) { document.getElementById('key-status').innerText='✅ 已保存'; alert('已保存'); }
+        else alert(d.error);
+    }
+
+    function toggleStyle() {
+        document.getElementById('manual-style-wrapper').style.display = document.getElementById('style-mode').value==='manual'?'block':'none';
+    }
+
+    // ========== 模式1：自动抓取 ==========
+    async function checkWxStatus() {
+        const el = document.getElementById('wx-status');
+        el.innerHTML = '<span class="loader"></span> 检测中...';
+        try {
+            const res = await fetch('/wx/status');
+            const d = await res.json();
+            el.innerHTML = d.online ? '✅ 微信在线' : `❌ ${d.error||'微信未登录'}`;
+        } catch(e) { el.innerHTML = '⚠️ 无法连接'; }
+    }
+
+    async function refreshChats() {
+        const list = document.getElementById('chat-list');
+        list.innerHTML = '<span class="loader"></span> 加载中...';
+        try {
+            const res = await fetch('/wx/chats');
+            if(!res.ok) throw new Error('失败');
+            const chats = await res.json();
+            list.innerHTML = '';
+            chats.forEach(c => {
+                const div = document.createElement('div');
+                div.className = 'chat-item';
+                div.innerHTML = `<span><strong>${c.name}</strong><br><small>${c.lastMsg||''}</small></span><span>${formatTime(c.time)}</span>`;
+                div.onclick = () => selectChat(c.id, div);
+                list.appendChild(div);
+            });
+        } catch(e) { list.innerHTML = `<span class="error-text">${e.message}</span>`; }
+    }
+
+    function selectChat(id, el) {
+        document.querySelectorAll('.chat-item').forEach(e => e.classList.remove('active'));
+        el.classList.add('active');
+        selectedChatId = id;
+        document.getElementById('summarize-auto-btn').disabled = false;
+    }
+
+    function setQuickRange(days) {
+        const today = new Date();
+        document.getElementById('until-date').value = today.toISOString().split('T')[0];
+        const since = new Date(today); since.setDate(today.getDate()-days);
+        document.getElementById('since-date').value = days>0 ? since.toISOString().split('T')[0] : '';
+    }
+
+    async function loadAutoMessages() {
+        if(!selectedChatId) return alert('请先选择聊天');
+        const since = document.getElementById('since-date').value;
+        const until = document.getElementById('until-date').value;
+        let url = `/wx/messages/${selectedChatId}?limit=500`;
+        if(since) url += `&since=${since}`;
+        if(until) url += `&until=${until}`;
+        const preview = document.getElementById('auto-message-preview');
+        preview.innerHTML = '<span class="loader"></span> 加载中...';
+        try {
+            const res = await fetch(url);
+            if(!res.ok) throw new Error('失败');
+            const msgs = await res.json();
+            currentMessages = msgs;
+            let html = '';
+            msgs.forEach(m => html += `<span style="color:#a0a0b0;">[${formatTime(m.time)}]</span> <strong>${m.sender}:</strong> ${m.content}<br>`);
+            preview.innerHTML = html || '无消息';
+            document.getElementById('mention-btn').disabled = false;
+        } catch(e) { preview.innerHTML = `<span class="error-text">${e.message}</span>`; }
+    }
+
+    // 定时自动总结
+    function toggleAutoSummary() {
+        const interval = parseInt(document.getElementById('auto-interval').value) || 0;
+        if(autoTimer) { clearInterval(autoTimer); autoTimer = null; document.getElementById('toggle-auto-btn').innerText = '启动定时总结'; document.getElementById('auto-status').innerText = ''; return; }
+        if(interval <= 0) return alert('请输入大于0的分钟数');
+        if(!selectedChatId || !currentMessages.length) return alert('请先选择聊天并加载消息');
+        document.getElementById('toggle-auto-btn').innerText = '停止定时总结';
+        document.getElementById('auto-status').innerHTML = `<span class="loader"></span> 每${interval}分钟自动总结`;
+        autoTimer = setInterval(() => { startSummary(true); }, interval * 60000);
+    }
+
+    // ========== 模式2：文件上传 ==========
+    function initUpload() {
+        const dz = document.getElementById('drop-zone');
+        const fi = document.getElementById('file-input');
+        dz.onclick = () => fi.click();
+        dz.ondragover = e => { e.preventDefault(); dz.style.borderColor='var(--primary)'; };
+        dz.ondragleave = () => dz.style.borderColor='var(--border)';
+        dz.ondrop = e => { e.preventDefault(); dz.style.borderColor='var(--border)'; if(e.dataTransfer.files.length) uploadFile(e.dataTransfer.files[0]); };
+        fi.onchange = () => { if(fi.files.length) uploadFile(fi.files[0]); };
+    }
+
+    async function uploadFile(file) {
+        // 允许所有扩展名（后端会校验）
+        const fd = new FormData(); fd.append('file', file);
+        document.getElementById('upload-status').innerHTML = '<span class="loader"></span> 解析中...';
+        try {
+            const res = await fetch('/upload', {method:'POST', body:fd});
+            if(!res.ok) { const e = await res.json(); throw new Error(e.error); }
+            const msgs = await res.json();
+            if(!msgs.length) return alert('未解析到消息');
+            currentMessages = msgs;
+            document.getElementById('summarize-file-btn').disabled = false;
+            document.getElementById('mention-btn').disabled = false;
+            document.getElementById('upload-status').innerHTML = `✅ 解析到 ${msgs.length} 条消息`;
+            let html = '';
+            msgs.forEach(m => html += `<span style="color:#a0a0b0;">[${formatTime(m.time)}]</span> <strong>${m.sender}:</strong> ${m.content}<br>`);
+            const preview = document.getElementById('file-message-preview');
+            preview.style.display = 'block';
+            preview.innerHTML = html;
+        } catch(e) { document.getElementById('upload-status').innerHTML = `<span class="error-text">${e.message}</span>`; }
+    }
+
+    // ========== 模式3：手动粘贴 ==========
+    function parsePasteAndSummary() {
+        const text = document.getElementById('paste-input').value.trim();
+        if(!text) return alert('请粘贴聊天记录');
+        const lines = text.split('\n');
+        const msgs = [];
+        for(const line of lines) {
+            const match = line.match(/\[?(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]? (\S+): (.+)/);
+            if(match) {
+                const [, timeStr, sender, content] = match;
+                msgs.push({sender, content, time: parseTime(timeStr)});
+            } else if(line.trim()) {
+                msgs.push({sender:'未知', content:line.trim(), time:0});
+            }
+        }
+        if(!msgs.length) return alert('未识别到有效消息');
+        currentMessages = msgs;
+        document.getElementById('summarize-paste-btn').disabled = false;
+        document.getElementById('mention-btn').disabled = false;
+        let html = '';
+        msgs.forEach(m => html += `<span style="color:#a0a0b0;">[${formatTime(m.time)}]</span> <strong>${m.sender}:</strong> ${m.content}<br>`);
+        const preview = document.getElementById('paste-message-preview');
+        preview.style.display = 'block';
+        preview.innerHTML = html;
+        startSummary(); // 直接开始总结
+    }
+
+    function parseTime(str) {
+        try { return Math.floor(new Date(str).getTime()/1000); } catch(e) { return 0; }
+    }
+
+    // ========== 查看提及原话 ==========
+    function showMentioned() {
+        const kw = document.getElementById('keywords').value.trim();
+        if(!kw) return alert('请输入关键词');
+        const keywords = kw.split(',').map(k=>k.trim()).filter(k=>k);
+        const matched = currentMessages.filter(m => keywords.some(k => (m.content||'').includes(k)));
+        let html = '';
+        matched.forEach(m => {
+            let c = m.content;
+            keywords.forEach(k => c = c.replace(new RegExp(k,'g'), `<mark style="background:#6c63ff;color:white;">$1</mark>`));
+            html += `<span style="color:#a0a0b0;">[${formatTime(m.time)}]</span> <strong>${m.sender}:</strong> ${c}<br>`;
+        });
+        const previewId = currentMode === 'auto' ? 'auto-message-preview' : (currentMode === 'file' ? 'file-message-preview' : 'paste-message-preview');
+        document.getElementById(previewId).innerHTML = html || '未找到';
+    }
+
+    function formatTime(ts) {
+        if(!ts) return '';
+        const d = new Date(ts*1000);
+        return `${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+    }
+
+    // ========== 通用总结调用 ==========
+    async function startSummary(isAuto = false) {
+        if(!currentMessages.length) return alert('请先获取消息');
+        const provider = document.getElementById('provider').value;
+        const apiKey = document.getElementById('api-key').value.trim();
+        const model = document.getElementById('model').value.trim();
+        const styleMode = document.getElementById('style-mode').value;
+        const manualStyle = document.getElementById('manual-style').value.trim();
+        const style = styleMode === 'manual' ? manualStyle : '';
+        const keywords = document.getElementById('keywords').value.trim();
+
+        const resultBox = document.getElementById('result-box');
+        const resultCard = document.getElementById('result-card');
+        resultCard.style.display = 'block';
+        resultBox.innerHTML = '<span class="loader"></span> 正在总结...';
+
+        try {
+            const res = await fetch('/summarize', {
+                method: 'POST',
+                headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({messages: currentMessages, provider, api_key: apiKey, model, style, keywords})
+            });
+            if(!res.ok) { const e = await res.json(); throw new Error(e.error); }
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '', eventData = [];
+            if(isAuto) resultBox.innerHTML += '<hr>';
+            while(true) {
+                const {done, value} = await reader.read();
+                if(done) break;
+                buffer += decoder.decode(value, {stream:true});
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+                for(const line of lines) {
+                    if(line.startsWith('data: ')) eventData.push(line.slice(6));
+                    else if(line === '' && eventData.length) {
+                        const content = eventData.join('\n');
+                        eventData = [];
+                        if(content === '[DONE]') resultBox.innerHTML += '\n✅ 总结完成';
+                        else if(content.startsWith('[错误]')) resultBox.innerHTML += `<span class="error-text">${content}</span>\n`;
+                        else resultBox.innerHTML += content + '\n';
+                    }
+                }
+            }
+        } catch(e) {
+            resultBox.innerHTML = `<span class="error-text">❌ ${e.message}</span>`;
+        }
+    }
+
+    document.getElementById('paste-input').addEventListener('input', function() {
+        document.getElementById('summarize-paste-btn').disabled = this.value.trim().length === 0;
+    });
+</script>
+</body>
+</html>
