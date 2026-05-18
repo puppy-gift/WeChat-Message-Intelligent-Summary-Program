@@ -4,12 +4,12 @@
 
 ## 功能特性
 
-- 🤖 **AI 智能总结**：自动提取聊天记录中的关键信息、与你相关的讨论、约定事项
-- 📊 **三合一模式**：自动抓取（wx-cli）、文件上传（支持 TXT/DOCX/PDF 等多种格式）、手动粘贴
-- 🎨 **自定义风格**：可选择让 AI 自动选择总结风格，或手动指定（幽默吐槽、正式汇报等）
-- 🎯 **关键词追踪**：可设置关注关键词，重点总结相关内容并查看提及原话
-- 💾 **本地处理**：所有数据在本地处理，不经过任何第三方服务器
-- 🔐 **API Key 加密记忆**：多 AI 提供商的 API Key 加密存储在本地，一次配置永久使用
+-  **AI 智能总结**：自动提取聊天记录中的关键信息、与你相关的讨论、约定事项
+-  **三合一模式**：自动抓取（wx-cli）、文件上传（支持 TXT/DOCX/PDF 等多种格式）、手动粘贴
+-  **自定义风格**：可选择让 AI 自动选择总结风格，或手动指定（幽默吐槽、正式汇报等）
+-  **关键词追踪**：可设置关注关键词，重点总结相关内容并查看提及原话
+-  **本地处理**：所有数据在本地处理，不经过任何第三方服务器
+-  **API Key 加密记忆**：多 AI 提供商的 API Key 加密存储在本地，一次配置永久使用
 
 ## 快速开始
 
@@ -25,6 +25,7 @@
 pip install -r requirements.txt
 
 
+### 重要提醒
 本项目仅供个人学习、研究和技术探索使用，严禁用于任何非法或商业用途。
 
 违反协议风险：本工具通过第三方技术读取微信本地数据，该行为可能违反《腾讯微信软件许可及服务协议》。
@@ -49,7 +50,3 @@ Privacy Risk: Improper use may expose your and others' chat records, constitutin
 Liability Disclaimer: By using this tool, you acknowledge and agree that all responsibilities and risks are borne solely by you. The developers and contributors of this project shall not be held liable for any consequences resulting from your use of this tool.
 
 Please fully understand the above risks before deciding to use this project
-
-运行
-python app.py
-直接双击exe文件
